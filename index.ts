@@ -6,6 +6,7 @@ type Bindings = {
   UPFILE_META: KVNamespace;
   UPFILE_API_KEY_SALT: string;
   POLAR_API_KEY?: string;
+  POLAR_PRODUCT_ID?: string;
   RESEND_API_KEY?: string;
   ENVIRONMENT: string;
 };
@@ -117,19 +118,30 @@ app.get("/upgrade", async (c) => {
   }
   
   // Create Polar checkout
-  const checkout = await fetch("https://api.polar.sh/v1/checkouts", {
+  const productId = c.env.POLAR_PRODUCT_ID || "pro";
+  const polarApiUrl = c.env.ENVIRONMENT === "production" 
+    ? "https://api.polar.sh/v1/checkouts"
+    : "https://sandbox-api.polar.sh/v1/checkouts";
+  
+  const checkout = await fetch(polarApiUrl, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${c.env.POLAR_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      product_id: "pro", // Your Polar product ID
+      product_id: productId,
       customer_email: user.owner_email,
       metadata: { key_hash: keyHash },
       success_url: "https://upfile.sh/dashboard?upgraded=1",
     }),
   });
+  
+  if (!checkout.ok) {
+    const err = await checkout.text();
+    console.error("[POLAR] Checkout creation failed:", err);
+    return c.json({ error: "Failed to create checkout", details: err }, 500);
+  }
   
   const data = await checkout.json();
   
