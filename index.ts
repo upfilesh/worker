@@ -8,6 +8,7 @@ type Bindings = {
   POLAR_API_KEY?: string;
   POLAR_PRODUCT_ID?: string;
   RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
   ENVIRONMENT: string;
 };
 
@@ -48,7 +49,7 @@ async function getUserByKeyHash(c: any, keyHash: string): Promise<any | null> {
   return userStr ? JSON.parse(userStr) : null;
 }
 
-// POST /signup — Create account (agent-friendly)
+// POST /signup - Create account (agent-friendly)
 app.post("/signup", async (c) => {
   const { email, owner_email } = await c.req.json();
   if (!email || !email.includes("@")) {
@@ -58,7 +59,7 @@ app.post("/signup", async (c) => {
   // Generate API key
   const key = `upf_${nanoid(24)}`;
   const keyHash = await hashKey(key, c.env.UPFILE_API_KEY_SALT);
-  
+
   // Store user
   const user = {
     email,
@@ -69,26 +70,26 @@ app.post("/signup", async (c) => {
     created_at: new Date().toISOString(),
     key_hash: keyHash,
   };
-  
+
   await c.env.UPFILE_META.put(`user:${keyHash}`, JSON.stringify(user));
   await c.env.UPFILE_META.put(`email:${email}`, keyHash);
-  
-  return c.json({ 
-    api_key: key, 
+
+  return c.json({
+    api_key: key,
     tier: "free",
     storage_limit_gb: FREE_STORAGE_GB,
     message: "Welcome to upfile. Upgrade anytime: upfile upgrade"
   });
 });
 
-// GET /status — Check storage
+// GET /status - Check storage
 app.get("/status", async (c) => {
   const keyHash = await getKeyHash(c);
   if (!keyHash) return c.json({ error: "Unauthorized" }, 401);
-  
+
   const user = await getUserByKeyHash(c, keyHash);
   if (!user) return c.json({ error: "User not found" }, 404);
-  
+
   return c.json({
     tier: user.tier,
     storage_used: user.storage_used,
@@ -98,14 +99,14 @@ app.get("/status", async (c) => {
   });
 });
 
-// GET /upgrade — Get Polar checkout URL
+// GET /upgrade - Get Polar checkout URL
 app.get("/upgrade", async (c) => {
   const keyHash = await getKeyHash(c);
   if (!keyHash) return c.json({ error: "Unauthorized" }, 401);
-  
+
   const user = await getUserByKeyHash(c, keyHash);
   if (!user) return c.json({ error: "User not found" }, 404);
-  
+
   if (!c.env.POLAR_API_KEY) {
     // Fallback: manual upgrade path
     return c.json({
@@ -116,13 +117,13 @@ app.get("/upgrade", async (c) => {
       price: "$9/month",
     });
   }
-  
+
   // Create Polar checkout
   const productId = c.env.POLAR_PRODUCT_ID || "pro";
-  const polarApiUrl = c.env.ENVIRONMENT === "production" 
+  const polarApiUrl = c.env.ENVIRONMENT === "production"
     ? "https://api.polar.sh/v1/checkouts"
     : "https://sandbox-api.polar.sh/v1/checkouts";
-  
+
   const checkout = await fetch(polarApiUrl, {
     method: "POST",
     headers: {
@@ -136,49 +137,49 @@ app.get("/upgrade", async (c) => {
       success_url: "https://upfile.sh/dashboard?upgraded=1",
     }),
   });
-  
+
   if (!checkout.ok) {
     const err = await checkout.text();
     console.error("[POLAR] Checkout creation failed:", err);
     return c.json({ error: "Failed to create checkout", details: err }, 500);
   }
-  
+
   const data = await checkout.json();
-  
+
   // Email notification to owner
   await sendUpgradeEmail(c, user.owner_email, data.url);
-  
+
   return c.json({
     checkout_url: data.url,
     message: `Upgrade link sent to ${user.owner_email}`,
   });
 });
 
-// POST /webhooks/polar — Handle Polar webhook
+// POST /webhooks/polar - Handle Polar webhook
 app.post("/webhooks/polar", async (c) => {
   const body = await c.req.json();
-  
+
   // Verify webhook signature (simplified - add proper verification)
   if (body.type === "checkout.completed" || body.type === "subscription.active") {
     const keyHash = body.metadata?.key_hash;
     if (!keyHash) return c.json({ error: "Missing key_hash" }, 400);
-    
+
     const userStr = await c.env.UPFILE_META.get(`user:${keyHash}`);
     if (!userStr) return c.json({ error: "User not found" }, 404);
-    
+
     const user = JSON.parse(userStr);
     user.tier = "pro";
     user.storage_limit = PRO_STORAGE_GB * 1024 * 1024 * 1024;
     user.upgraded_at = new Date().toISOString();
-    
+
     await c.env.UPFILE_META.put(`user:${keyHash}`, JSON.stringify(user));
-    
+
     // Send confirmation email
     await sendConfirmationEmail(c, user.owner_email);
-    
+
     return c.json({ upgraded: true, tier: "pro" });
   }
-  
+
   return c.json({ received: true });
 });
 
@@ -199,15 +200,15 @@ app.post("/upload", async (c) => {
   if (user.storage_used + file.size > user.storage_limit) {
     const usedGb = (user.storage_used / (1024**3)).toFixed(2);
     const limitGb = (user.storage_limit / (1024**3)).toFixed(0);
-    const upgradeMsg = user.tier === "free" 
+    const upgradeMsg = user.tier === "free"
       ? "Upgrade to Pro for 100GB: upfile upgrade"
       : "Contact support for more storage";
-    
+
     // Notify owner
     await sendLimitWarningEmail(c, user.owner_email, usedGb);
-    
-    return c.json({ 
-      error: "Storage limit reached", 
+
+    return c.json({
+      error: "Storage limit reached",
       used_gb: usedGb,
       limit_gb: limitGb,
       message: upgradeMsg,
@@ -264,7 +265,7 @@ app.post("/upload", async (c) => {
   });
 });
 
-// GET /f/:id — private/expiring proxy
+// GET /f/:id - private/expiring proxy
 app.get("/f/:id", async (c) => {
   const id = c.req.param("id");
   const metaStr = await c.env.UPFILE_META.get(`file:${id}`);
@@ -299,7 +300,7 @@ app.get("/f/:id", async (c) => {
   });
 });
 
-// GET /files — list files
+// GET /files - list files
 app.get("/files", async (c) => {
   const keyHash = await getKeyHash(c);
   if (!keyHash) return c.json({ error: "Unauthorized" }, 401);
@@ -353,72 +354,234 @@ app.delete("/f/:id", async (c) => {
 });
 
 // Email helpers using Resend
-async function sendEmail(c: any, to: string, subject: string, html: string) {
+async function sendEmail(c: any, to: string, subject: string, html: string, text: string, fromName: string, fromEmail: string, headers?: Record<string, string>) {
   if (!c.env.RESEND_API_KEY) {
     console.log(`[EMAIL SKIPPED] No RESEND_API_KEY set. Would send to ${to}: ${subject}`);
     return;
   }
-  
+
+  // Format: "Sender Name <email@domain.com>"
+  const from = `${fromName} <${fromEmail}>`;
+
+  const body: any = {
+    from,
+    to,
+    subject,
+    html,
+    text,
+    headers: headers || {},
+  };
+
+  // Add reply_to for billing emails
+  if (fromEmail === "billing@upfile.sh") {
+    body.reply_to = "hi@upfile.sh";
+    body.headers["List-Unsubscribe"] = "<mailto:hi@upfile.sh?subject=unsubscribe>";
+  }
+
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${c.env.RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      from: "upfile.sh <notifications@upfile.sh>",
-      to,
-      subject,
-      html,
-    }),
+    body: JSON.stringify(body),
   });
-  
+
+  const responseText = await res.text();
+
   if (!res.ok) {
-    const err = await res.text();
-    console.error(`[EMAIL FAILED] ${err}`);
+    console.error(`[EMAIL FAILED] ${res.status}: ${responseText}`);
   } else {
-    console.log(`[EMAIL SENT] ${to}: ${subject}`);
+    const data = JSON.parse(responseText);
+    console.log(`[EMAIL SENT] ${to}: ${subject} (id: ${data.id})`);
   }
 }
 
 async function sendUpgradeEmail(c: any, email: string, checkoutUrl: string) {
-  await sendEmail(c, email, "Upgrade upfile.sh to Pro", `
-    <div style="font-family: system-ui, sans-serif; max-width: 500px; margin: 40px auto;">
-      <h2 style="color: #000;">Your upfile storage is almost full</h2>
-      <p>An agent using your upfile account is requesting more storage.</p>
-      <a href="${checkoutUrl}" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0;">
+  const subject = "Your upfile storage is almost full — Upgrade to Pro";
+  const text = `Your upfile storage is almost full.
+
+An agent using your upfile account is requesting more storage.
+
+Upgrade to Pro for $9/month:
+${checkoutUrl}
+
+Pro includes 100GB storage, unlimited uploads, and private files.
+
+Questions? Reply to this email or contact hi@upfile.sh
+
+—
+upfile.sh
+https://upfile.sh`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upgrade your upfile storage</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px 20px;">
+    <!-- Preheader (hidden) -->
+    <div style="display: none; max-height: 0; overflow: hidden;">
+      Your agent needs more storage. Upgrade to Pro for 100GB at $9/month.
+    </div>
+
+    <h1 style="color: #000; font-size: 24px; margin: 0 0 20px;">Your upfile storage is almost full</h1>
+
+    <p style="color: #333; font-size: 16px; line-height: 1.5; margin: 0 0 20px;">
+      An agent using your upfile account is requesting more storage.
+    </p>
+
+    <div style="margin: 30px 0;">
+      <a href="${checkoutUrl}" style="display: inline-block; background: #000; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 500;">
         Upgrade to Pro — $9/month
       </a>
-      <p style="color: #666; font-size: 14px;">
-        Pro includes 100GB storage, unlimited uploads, and private files.
-      </p>
     </div>
-  `);
+
+    <p style="color: #666; font-size: 14px; line-height: 1.5; margin: 0 0 20px;">
+      Pro includes 100GB storage, unlimited uploads, and private files.
+    </p>
+
+    <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 30px 0;">
+
+    <p style="color: #999; font-size: 13px; line-height: 1.5; margin: 0;">
+      Questions? Reply to this email or contact <a href="mailto:hi@upfile.sh" style="color: #666;">hi@upfile.sh</a><br>
+      <a href="https://upfile.sh" style="color: #666;">upfile.sh</a>
+    </p>
+  </div>
+</body>
+</html>`;
+
+  await sendEmail(c, email, subject, html, text, "upfile billing", "billing@upfile.sh");
 }
 
 async function sendConfirmationEmail(c: any, email: string) {
-  await sendEmail(c, email, "Welcome to upfile.sh Pro", `
-    <div style="font-family: system-ui, sans-serif; max-width: 500px; margin: 40px auto;">
-      <h2 style="color: #000;">You're upgraded to Pro</h2>
-      <p>Your upfile account now has 100GB of storage.</p>
-      <p>All agents using your API key can continue uploading without limits.</p>
-      <a href="https://upfile.sh/dashboard" style="color: #000;">View dashboard →</a>
+  const subject = "Welcome to upfile Pro — Your account is upgraded";
+  const text = `Welcome to upfile Pro!
+
+Your upfile account now has 100GB of storage.
+
+All agents using your API key can continue uploading without limits.
+
+View your dashboard: https://upfile.sh/dashboard
+
+Questions? Contact hi@upfile.sh
+
+—
+upfile.sh
+https://upfile.sh`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to upfile Pro</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px 20px;">
+    <!-- Preheader (hidden) -->
+    <div style="display: none; max-height: 0; overflow: hidden;">
+      Your account now has 100GB of storage. All agents can continue uploading.
     </div>
-  `);
+
+    <h1 style="color: #000; font-size: 24px; margin: 0 0 20px;">You're upgraded to Pro</h1>
+
+    <p style="color: #333; font-size: 16px; line-height: 1.5; margin: 0 0 20px;">
+      Your upfile account now has <strong>100GB of storage</strong>.
+    </p>
+
+    <p style="color: #333; font-size: 16px; line-height: 1.5; margin: 0 0 30px;">
+      All agents using your API key can continue uploading without limits.
+    </p>
+
+    <div style="margin: 30px 0;">
+      <a href="https://upfile.sh/dashboard" style="display: inline-block; background: #000; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+        View dashboard
+      </a>
+    </div>
+
+    <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 30px 0;">
+
+    <p style="color: #999; font-size: 13px; line-height: 1.5; margin: 0;">
+      Questions? Contact <a href="mailto:hi@upfile.sh" style="color: #666;">hi@upfile.sh</a><br>
+      <a href="https://upfile.sh" style="color: #666;">upfile.sh</a>
+    </p>
+  </div>
+</body>
+</html>`;
+
+  await sendEmail(c, email, subject, html, text, "upfile billing", "billing@upfile.sh");
 }
 
 async function sendLimitWarningEmail(c: any, email: string, usedGb: string) {
-  await sendEmail(c, email, "upfile.sh storage limit reached", `
-    <div style="font-family: system-ui, sans-serif; max-width: 500px; margin: 40px auto;">
-      <h2 style="color: #000;">Storage limit reached</h2>
-      <p>An agent tried to upload a file but your free tier is full (${usedGb}GB used).</p>
-      <p>Run <code>upfile upgrade</code> to get a checkout link, or visit:</p>
-      <a href="https://upfile.sh/dashboard" style="color: #000;">upfile.sh/dashboard</a>
+  const subject = "Your upfile storage limit has been reached";
+  const text = `Your upfile storage limit has been reached.
+
+An agent tried to upload a file but your free tier is full (${usedGb}GB used).
+
+Run "upfile upgrade" to get a checkout link, or visit:
+https://upfile.sh/dashboard
+
+Questions? Contact hi@upfile.sh
+
+—
+upfile.sh
+https://upfile.sh`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage limit reached</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5;">
+  <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px 20px;">
+    <!-- Preheader (hidden) -->
+    <div style="display: none; max-height: 0; overflow: hidden;">
+      Your free tier is full. Upgrade to Pro for 100GB of storage.
     </div>
-  `);
+
+    <h1 style="color: #000; font-size: 24px; margin: 0 0 20px;">Storage limit reached</h1>
+
+    <p style="color: #333; font-size: 16px; line-height: 1.5; margin: 0 0 20px;">
+      An agent tried to upload a file but your free tier is full (<strong>${usedGb}GB used</strong>).
+    </p>
+
+    <p style="color: #333; font-size: 16px; line-height: 1.5; margin: 0 0 30px;">
+      Run <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">upfile upgrade</code> to get a checkout link, or visit your dashboard.
+    </p>
+
+    <div style="margin: 30px 0;">
+      <a href="https://upfile.sh/dashboard" style="display: inline-block; background: #000; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+        View dashboard
+      </a>
+    </div>
+
+    <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 30px 0;">
+
+    <p style="color: #999; font-size: 13px; line-height: 1.5; margin: 0;">
+      Questions? Contact <a href="mailto:hi@upfile.sh" style="color: #666;">hi@upfile.sh</a><br>
+      <a href="https://upfile.sh" style="color: #666;">upfile.sh</a>
+    </p>
+  </div>
+</body>
+</html>`;
+
+  await sendEmail(c, email, subject, html, text, "upfile billing", "billing@upfile.sh");
 }
 
 // GET /health
 app.get("/health", (c) => c.json({ ok: true, version: "1.1.0" }));
+
+// POST /test/email - Debug endpoint
+app.post("/test/email", async (c) => {
+  const { to } = await c.req.json();
+  await sendEmail(c, to || "perry@raskin.me", "Test from upfile", "<h1>Test email</h1>", "This is a test email from upfile.", "upfile billing", "billing@upfile.sh");
+  return c.json({ sent: true, to: to || "perry@raskin.me" });
+});
 
 export default app;
