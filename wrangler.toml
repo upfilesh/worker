@@ -1,0 +1,19 @@
+name = "upfile-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+workers_dev = false
+
+[route]
+pattern = "api.upfile.sh"
+custom_domain = true
+
+[[r2_buckets]]
+binding = "UPFILE_BUCKET"
+bucket_name = "upfile-files"
+
+[[kv_namespaces]]
+binding = "UPFILE_META"
+id = "5a06c4a562f648f7934b62b908b9e530"
+
+[vars]
+ENVIRONMENT = "production"
